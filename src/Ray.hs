@@ -1,11 +1,13 @@
 module Ray where
 
+import Data.Array
 import Data.Glome.Vec as V
-import Graphics.Image hiding (map)
+import Graphics.Image hiding (Array, map)
 import Debug.Trace
 import Data.Maybe
 import Data.List hiding (intersect)
 import Data.Ord
+import System.Random
 
 type Colour = Pixel RGB Double
 
@@ -63,20 +65,23 @@ intersect (Ray ro rd) (Plane n d)
     , t > 0.00001
     ]
 
-rayTrace :: World -> Ray -> Int -> Pixel RGB Double
-rayTrace w ray 0 = colour (sky w)
-rayTrace w ray limit = toColor $ concat $ (removeEmpties . (\o -> (intersect ray (shape o), material o))) <$> (objects w)
+rayTrace :: RandomGen g => World -> Ray -> g -> Int -> Pixel RGB Double
+rayTrace w ray rand 0 = colour black
+rayTrace w ray rand limit = toColor $ concat $ (removeEmpties . (\o -> (intersect ray (shape o), material o))) <$> (objects w)
   where toColor :: [(Hit, Material)] -> Colour
         toColor [] = colour (sky w)
         toColor vs = mkColour $ head $
           sortBy (comparing ((\v -> vlen (origin cam `vsub` v)) . fst . fst)) $ vs
         mkColour ((hitPos, hitNorm), mat)
-          = lerp (specular mat)
-            (colour mat)
-            (colour mat + rayTrace w (Ray hitPos newRayDir) (limit - 1))
+          = (colour mat + rayTrace w (Ray hitPos newRayDir) rand' (limit - 1))
           where
-            newRayDir = (vnorm (dir ray `vsub` hitNorm `vscale`
-                                (2 * (dir ray `vdot` hitNorm))))
+            reflectedRay = (vnorm (dir ray `vsub` hitNorm `vscale`
+                                   (2 * (dir ray `vdot` hitNorm))))
+            (newRayDir, rand') = let
+              (x, r1) = random rand
+              (y, r2) = random r1
+              (z, r3) = random r2
+              in (vnorm (reflectedRay `vadd` (vmap (lerp (1 - specular mat) 0) (Vec x y z))), r3)
         removeEmpties ([], c) = []
         removeEmpties (xs, c) = (,c) <$> xs
         cam = camera w
@@ -89,12 +94,17 @@ film :: ImageProperties -> Ray -> Int -> Int -> Ray
 film img cam i j = Ray (origin cam) direction
   where direction = (vnorm (dir cam)) `vadd` (Vec (fromIntegral i / fromIntegral (width img) - (0.5)) 0 (fromIntegral j / fromIntegral (height img) - (0.5)))
 
-render :: ImageProperties -> World -> Image VU RGB Double
-render img world = makeImage (width img, height img) (\(i,j) -> rayTrace world (film img (camera world) j i) 20)
+render :: RandomGen g => ImageProperties -> World -> g -> Image VU RGB Double
+render img world rand = makeImage (width img, height img) (\(i,j) -> rayTrace world (film img (camera world) j i) (rands ! (i,j)) 10)
+  where
+    rands = splitMany rand (width img) (height img)
+
+splitMany :: RandomGen g => g -> Int -> Int -> Array (Int, Int) g
+splitMany rand x y = listArray ((0,0), (x,y)) (unfoldr (pure . split) rand)
 
 testWorld :: World
 testWorld = World
-  { camera = Ray camPos (vnorm (origin `vsub` camPos))
+  { camera = Ray camPos (vnorm (vzero `vsub` camPos))
   , objects = [ Object (Plane (vnorm (Vec 0.1 0.0 1)) (Vec 0 0 0)) cherryRed
               , Object (Plane (vnorm (Vec (-0.1) 0.0 1)) (Vec 0 0 (-0.1))) dullGreen
               , Object (Plane (vnorm (Vec 0 (0.3) 1)) (Vec 0 0 100)) black
@@ -105,22 +115,23 @@ testWorld = World
   }
   where
     camPos = Vec 0 (-10) 1
-    skyBlue = mkColour 0.2 0.4 0.7
-    cherryRed = mkColour 0.8 0.2 0.0
-    dullGreen = mkColour 0.1 0.8 0.0
-    grey = mkColour 0.4 0.4 0.4
-    pink = mkColour 1 0.4 0.4
-    black = mkColour 0.0 0.0 0.0
-    mirror = Material { colour = PixelRGB 0.1 0.5 0.0, specular = 0.9 }
-    origin = Vec 0 0 0
-    mkColour r g b = Material { colour = PixelRGB r g b, specular = 0.1 }
+
+skyBlue = mkColour 0.2 0.4 0.7
+cherryRed = mkColour 0.8 0.2 0.0
+dullGreen = mkColour 0.1 0.8 0.0
+grey = mkColour 0.4 0.4 0.4
+pink = mkColour 0.6 0.2 0.2
+black = mkColour 0.0 0.0 0.0
+mirror = Material { colour = PixelRGB 0.1 0.5 0.0, specular = 1 }
+mkColour r g b = Material { colour = PixelRGB r g b, specular = 0.1 }
 
 smallImage :: ImageProperties
 smallImage = ImageProperties { width = 720, height = 720 }
 
-testImage :: Image VU RGB Double
-testImage = render smallImage testWorld
+testImage :: RandomGen g => g -> Image VU RGB Double
+testImage rand = render smallImage testWorld rand
 
 main :: IO ()
-main = do writeImage "test.png" testImage
+main = do rand <- newStdGen
+          writeImage "test.png" (testImage rand)
           return ()

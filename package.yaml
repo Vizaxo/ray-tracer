@@ -6,6 +6,8 @@ dependencies:
 - base >= 4.7 && < 5
 - GlomeVec
 - hip
+- random
+- array
 
 default-extensions:
 - DataKinds
