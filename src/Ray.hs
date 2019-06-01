@@ -58,7 +58,7 @@ intersect (Ray rayOrigin rd) (Sphere centre r)
     , let hitPos = rayOrigin `vadd` (rd `vscale` t)
     ]
 intersect (Ray ro rd) (Plane n d)
-  = [(ro `vadd` (rd `vscale` t), n)
+  = [(ro `vadd` (rd `vscale` t), vinvert n) --TODO: calculate whether to invert this based on which face was hit
     | let denom = vdot n rd
     , denom /= 0
     , let t = (vdot n (ro `vsub` d)) / denom
@@ -81,7 +81,7 @@ rayTrace w ray rand limit = toColor $ concat $ (removeEmpties . (\o -> (intersec
               (x, r1) = random rand
               (y, r2) = random r1
               (z, r3) = random r2
-              in (vnorm (reflectedRay `vadd` (vmap (lerp (1 - specular mat) 0) (Vec x y z))), r3)
+              in (vnorm (vmap2 (lerp (specular mat)) (hitNorm `vadd` (Vec x y z)) reflectedRay), r3)
         removeEmpties ([], c) = []
         removeEmpties (xs, c) = (,c) <$> xs
         cam = camera w
