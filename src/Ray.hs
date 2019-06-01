@@ -94,24 +94,33 @@ film :: ImageProperties -> Ray -> Int -> Int -> Ray
 film img cam i j = Ray (origin cam) direction
   where direction = (vnorm (dir cam)) `vadd` (Vec (fromIntegral i / fromIntegral (width img) - (0.5)) 0 (fromIntegral j / fromIntegral (height img) - (0.5)))
 
+multipleRays :: RandomGen g => Int -> World -> Ray -> g -> Pixel RGB Double
+multipleRays count world ray rand = avg $ take count $ fmap (\r -> rayTrace world ray r 10) $ mkRands rand
+  where
+    avg :: [Pixel RGB Double] -> Pixel RGB Double
+    avg = foldr (+) 0 . fmap (/ (realToFrac count))
+
 render :: RandomGen g => ImageProperties -> World -> g -> Image VU RGB Double
-render img world rand = makeImage (width img, height img) (\(i,j) -> rayTrace world (film img (camera world) j i) (rands ! (i,j)) 10)
+render img world rand = makeImage (width img, height img)
+  (\(i,j) -> multipleRays 16 world (film img (camera world) j i) (rands ! (i,j)))
   where
     rands = splitMany rand (width img) (height img)
 
 splitMany :: RandomGen g => g -> Int -> Int -> Array (Int, Int) g
-splitMany rand x y = listArray ((0,0), (x,y)) (unfoldr (pure . split) rand)
+splitMany rand x y = listArray ((0,0), (x,y)) (mkRands rand)
+
+mkRands :: RandomGen g => g -> [g]
+mkRands = unfoldr (pure . split)
 
 testWorld :: World
 testWorld = World
   { camera = Ray camPos (vnorm (vzero `vsub` camPos))
   , objects = [ Object (Plane (vnorm (Vec 0.1 0.0 1)) (Vec 0 0 0)) cherryRed
               , Object (Plane (vnorm (Vec (-0.1) 0.0 1)) (Vec 0 0 (-0.1))) dullGreen
-              , Object (Plane (vnorm (Vec 0 (0.3) 1)) (Vec 0 0 100)) black
               , Object (Sphere (Vec 0 (-2) 1.5) 1) mirror
-              , Object (Sphere (Vec 1 (-6) 1) 0.3) pink
+              , Object (Sphere (Vec 1 (-6) 1) 0.3) redLight
               ]
-  , sky = skyBlue
+  , sky = mkColour 0.2 0.3 0.3
   }
   where
     camPos = Vec 0 (-10) 1
