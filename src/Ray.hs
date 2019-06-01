@@ -9,6 +9,9 @@ import Data.List hiding (intersect)
 import Data.Ord
 import System.Random
 
+tau :: Floating a => a
+tau = 2 * pi
+
 type Colour = Pixel RGB Double
 
 data Material = Material
@@ -79,13 +82,26 @@ rayTrace w ray rand limit = toColor $ concat $ (removeEmpties . (\o -> (intersec
             reflectedRay = (vnorm (dir ray `vsub` hitNorm `vscale`
                                    (2 * (dir ray `vdot` hitNorm))))
             (newRayDir, rand') = let
-              (x, r1) = random rand
-              (y, r2) = random r1
-              (z, r3) = random r2
-              in (vnorm (vmap2 (lerp (specular mat)) (hitNorm `vadd` (Vec x y z)) reflectedRay), r3)
+              (r1, r2) = split rand
+              in (vnorm (vmap2 (lerp (specular mat)) (sampleHemisphere r1 hitNorm) reflectedRay), r2) --TODO: uniform vector lerp?
         removeEmpties ([], c) = []
         removeEmpties (xs, c) = (,c) <$> xs
         cam = camera w
+
+-- Uniform sampling of points of a hemisphere with its pole in the
+-- direction of v
+sampleHemisphere :: RandomGen g => g -> Vec -> Vec
+sampleHemisphere rand v =
+  let u = sampleSphere rand
+  in if v `vdot` u >= 0 then u else (vinvert u)
+
+sampleSphere :: RandomGen g => g -> Vec
+sampleSphere rand = let
+  (u1, rand') = random rand
+  r = sqrt (1 - u1*u1)
+  (u2, _) = random rand'
+  phi = tau * u2
+  in Vec (cos phi * r) (sin phi * r) (2 * u1)
 
 lerp :: Fractional n => Double -> n -> n -> n
 lerp l a b = (realToFrac $ 1 - l) * a + realToFrac l * b
