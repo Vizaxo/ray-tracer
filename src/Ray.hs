@@ -11,7 +11,7 @@ type Colour = Pixel RGB Double
 
 data Material = Material
   { colour :: Colour
-  , mirror :: Bool
+  , specular :: Double -- 0 = pure diffuse, 1 = pure specular
   }
   deriving Show
 
@@ -71,14 +71,18 @@ rayTrace w ray limit = toColor $ concat $ (removeEmpties . (\o -> (intersect ray
         toColor vs = mkColour $ head $
           sortBy (comparing ((\v -> vlen (origin cam `vsub` v)) . fst . fst)) $ vs
         mkColour ((hitPos, hitNorm), mat)
-          | mirror mat = rayTrace w (Ray hitPos newRayDir) (limit - 1)
-          | otherwise = colour mat
+          = lerp (specular mat)
+            (colour mat)
+            (colour mat + rayTrace w (Ray hitPos newRayDir) (limit - 1))
           where
             newRayDir = (vnorm (dir ray `vsub` hitNorm `vscale`
                                 (2 * (dir ray `vdot` hitNorm))))
         removeEmpties ([], c) = []
         removeEmpties (xs, c) = (,c) <$> xs
         cam = camera w
+
+lerp :: Fractional n => Double -> n -> n -> n
+lerp l a b = (realToFrac $ 1 - l) * a + realToFrac l * b
 
 --Calculate the ray to project onto the film
 film :: ImageProperties -> Ray -> Int -> Int -> Ray
@@ -107,9 +111,9 @@ testWorld = World
     grey = mkColour 0.4 0.4 0.4
     pink = mkColour 1 0.4 0.4
     black = mkColour 0.0 0.0 0.0
-    mirror = Material { colour = PixelRGB 0.0 0.0 0.0, mirror = True }
+    mirror = Material { colour = PixelRGB 0.1 0.5 0.0, specular = 0.9 }
     origin = Vec 0 0 0
-    mkColour r g b = Material { colour = PixelRGB r g b, mirror = False }
+    mkColour r g b = Material { colour = PixelRGB r g b, specular = 0.1 }
 
 smallImage :: ImageProperties
 smallImage = ImageProperties { width = 720, height = 720 }
