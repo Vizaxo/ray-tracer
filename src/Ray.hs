@@ -12,7 +12,8 @@ import System.Random
 type Colour = Pixel RGB Double
 
 data Material = Material
-  { colour :: Colour
+  { diffuseColour :: Colour
+  , emissionColour :: Colour
   , specular :: Double -- 0 = pure diffuse, 1 = pure specular
   }
   deriving Show
@@ -66,14 +67,14 @@ intersect (Ray ro rd) (Plane n d)
     ]
 
 rayTrace :: RandomGen g => World -> Ray -> g -> Int -> Pixel RGB Double
-rayTrace w ray rand 0 = colour black
+rayTrace w ray rand 0 = diffuseColour (sky w)
 rayTrace w ray rand limit = toColor $ concat $ (removeEmpties . (\o -> (intersect ray (shape o), material o))) <$> (objects w)
   where toColor :: [(Hit, Material)] -> Colour
-        toColor [] = colour (sky w)
+        toColor [] = diffuseColour (sky w)
         toColor vs = mkColour $ head $
           sortBy (comparing ((\v -> vlen (origin cam `vsub` v)) . fst . fst)) $ vs
         mkColour ((hitPos, hitNorm), mat)
-          = (colour mat + rayTrace w (Ray hitPos newRayDir) rand' (limit - 1))
+          = (emissionColour mat + diffuseColour mat * rayTrace w (Ray hitPos newRayDir) rand' (limit - 1))
           where
             reflectedRay = (vnorm (dir ray `vsub` hitNorm `vscale`
                                    (2 * (dir ray `vdot` hitNorm))))
@@ -95,14 +96,19 @@ film img cam i j = Ray (origin cam) direction
   where direction = (vnorm (dir cam)) `vadd` (Vec (fromIntegral i / fromIntegral (width img) - (0.5)) 0 (fromIntegral j / fromIntegral (height img) - (0.5)))
 
 multipleRays :: RandomGen g => Int -> World -> Ray -> g -> Pixel RGB Double
-multipleRays count world ray rand = avg $ take count $ fmap (\r -> rayTrace world ray r 10) $ mkRands rand
+multipleRays count world ray rand = expAvg $ take count $ fmap (\r -> rayTrace world ray r 10) $ mkRands rand
   where
-    avg :: [Pixel RGB Double] -> Pixel RGB Double
-    avg = foldr (+) 0 . fmap (/ (realToFrac count))
+    --TODO: properly manage linear/logarithmic lighting
+    expAvg :: [Pixel RGB Double] -> Pixel RGB Double
+    expAvg = brighten . (**(1/lightPower)) . foldr (+) 0 . fmap (/ (realToFrac count)) . fmap (**lightPower)
+
+    lightPower :: Pixel RGB Double
+    lightPower = 2
+    brighten = (**0.25)
 
 render :: RandomGen g => ImageProperties -> World -> g -> Image VU RGB Double
 render img world rand = makeImage (width img, height img)
-  (\(i,j) -> multipleRays 16 world (film img (camera world) j i) (rands ! (i,j)))
+  (\(i,j) -> multipleRays 32 world (film img (camera world) j i) (rands ! (i,j)))
   where
     rands = splitMany rand (width img) (height img)
 
@@ -126,13 +132,14 @@ testWorld = World
     camPos = Vec 0 (-10) 1
 
 skyBlue = mkColour 0.2 0.4 0.7
-cherryRed = mkColour 0.8 0.2 0.0
-dullGreen = mkColour 0.1 0.8 0.0
+cherryRed = mkColour 0.9 0.3 0.2
+dullGreen = mkColour 0.3 0.8 0.4
 grey = mkColour 0.4 0.4 0.4
-pink = mkColour 0.6 0.2 0.2
+pink = mkColour 0.9 0.3 0.4
 black = mkColour 0.0 0.0 0.0
-mirror = Material { colour = PixelRGB 0.1 0.5 0.0, specular = 1 }
-mkColour r g b = Material { colour = PixelRGB r g b, specular = 0.1 }
+mirror = Material { diffuseColour = PixelRGB 0.97 0.97 1, emissionColour = 0, specular = 0.99 }
+mkColour r g b = Material { diffuseColour = PixelRGB r g b, emissionColour = 0, specular = 0.0 }
+redLight = Material { diffuseColour = 0, emissionColour = PixelRGB 1 0.3 0.1, specular = 0.1 }
 
 smallImage :: ImageProperties
 smallImage = ImageProperties { width = 720, height = 720 }
