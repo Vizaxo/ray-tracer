@@ -42,6 +42,8 @@ data World = World
 data ImageProperties = ImageProperties
   { width :: Int
   , height :: Int
+  , raysPerPixel :: Int
+  , maxBounces :: Int
   }
   deriving Show
 
@@ -120,7 +122,7 @@ multipleRays :: RandomGen g => Int -> World -> ImageProperties -> Int -> Int -> 
 multipleRays count world img i j rand
   = expAvg $ take count $ fmap (singleRay . split3) $ mkRands rand
   where
-    singleRay = (\(r1, r2, r3) -> rayTrace world (film img (camera world) (jitter r1 i) (jitter r2 j)) r3 4)
+    singleRay = (\(r1, r2, r3) -> rayTrace world (film img (camera world) (jitter r1 i) (jitter r2 j)) r3 (maxBounces img))
 
     --TODO: properly manage linear/logarithmic lighting
     expAvg :: [Pixel RGB Double] -> Pixel RGB Double
@@ -132,7 +134,7 @@ multipleRays count world img i j rand
 
 render :: RandomGen g => ImageProperties -> World -> g -> Image VU RGB Double
 render img world rand = makeImage (height img, width img)
-  (\(j,i) -> multipleRays 32 world img i j (rands ! (i,j)))
+  (\(j,i) -> multipleRays (raysPerPixel img) world img i j (rands ! (i,j)))
   where
     rands = splitMany rand (width img) (height img)
 
@@ -170,7 +172,11 @@ mkColour r g b = Material { diffuseColour = PixelRGB r g b, emissionColour = 0, 
 redLight = Material { diffuseColour = 0, emissionColour = PixelRGB 1 0.3 0.1, specular = 0.1 }
 
 smallImage :: ImageProperties
-smallImage = ImageProperties { width = 720, height = 720 }
+smallImage = ImageProperties
+  { width = 720
+  , height = 720
+  , raysPerPixel = 32
+  , maxBounces = 4 }
 
 testImage :: RandomGen g => g -> Image VU RGB Double
 testImage rand = render smallImage testWorld rand
