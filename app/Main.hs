@@ -25,30 +25,44 @@ testWorld = World
   where
     camPos = Vec 0 (-10) 1
 
+defaultMaterial :: Material
+defaultMaterial = Material
+  { diffuseColour = black
+  , emissionColour = black
+  , specular = 0
+  , transparency = 0
+  }
+
 skyBlue = mkColour 0.2 0.4 0.7
 cherryRed = mkColour 0.9 0.3 0.2
 dullGreen = mkColour 0.3 0.8 0.4
 grey = mkColour 0.4 0.4 0.4
 pink = mkColour 0.9 0.3 0.4
-black = mkColour 0.0 0.0 0.0
-mirror = Material { diffuseColour = PixelRGB 0.97 0.97 1, emissionColour = 0, specular = 0.999, transparency = 0 }
-mkColour r g b = Material { diffuseColour = PixelRGB r g b, emissionColour = 0, specular = 0.0, transparency = 0 }
-redLight = Material { diffuseColour = 0, emissionColour = PixelRGB 1 0.3 0.1, specular = 0.1, transparency = 0 }
-blueLight = Material { diffuseColour = 0, emissionColour = PixelRGB 0.2 0.3 1, specular = 0.1, transparency = 0 }
-greenLight = Material { diffuseColour = 0, emissionColour = PixelRGB 0.1 0.4 0.1, specular = 0.1, transparency = 0 }
-greenGlass = Material { diffuseColour = PixelRGB 0.95 1 0.95, emissionColour = 0, specular = 0.99, transparency = 0.9 }
+mirror = defaultMaterial {diffuseColour = PixelRGB 0.97 0.97 1, specular = 1}
+mkColour r g b = defaultMaterial {diffuseColour = PixelRGB r g b}
+redLight = defaultMaterial {emissionColour = PixelRGB 1 0.3 0.1}
+blueLight = defaultMaterial {emissionColour = PixelRGB 0.2 0.3 1}
+greenLight = defaultMaterial {emissionColour = PixelRGB 0.1 0.4 0.1}
+greenGlass = defaultMaterial {diffuseColour = PixelRGB 0.95 1 0.95, specular = 0.99, transparency = 0.9 }
 
-smallImage :: ImageProperties
-smallImage = ImageProperties
+hqImage :: ImageProperties
+hqImage = ImageProperties
   { width = 720
   , height = 720
   , raysPerPixel = 256
   , maxBounces = 10 }
 
-testImage :: RandomGen g => g -> Image VU RGB Double
-testImage rand = render smallImage testWorld rand
+testImage :: ImageProperties
+testImage = ImageProperties
+  { width = 150
+  , height = 150
+  , raysPerPixel = 8
+  , maxBounces = 4 }
+
+renderedImage :: RandomGen g => g -> Image VU RGB Double
+renderedImage rand = render testImage testWorld rand
 
 main :: IO ()
 main = do rand <- newStdGen
-          writeImage "test.png" (testImage rand)
+          writeImage "test.png" (renderedImage rand)
           return ()
