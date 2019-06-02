@@ -66,6 +66,4 @@ renderedImage :: RandomGen g => g -> Image VU RGB Double
 renderedImage rand = render testImage testWorld rand
 
 main :: IO ()
-main = do rand <- newStdGen
-          writeImage "test.png" (renderedImage rand)
-          return ()
+main = writeImage "test.png" =<< renderedImage <$> newStdGen

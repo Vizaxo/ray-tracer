@@ -5,6 +5,7 @@ import Data.Glome.Vec as V
 import Graphics.Image hiding (Array, map)
 import Data.List hiding (intersect)
 import Data.Ord
+import Data.Maybe
 import System.Random
 
 tau :: Floating a => a
@@ -25,7 +26,7 @@ data Material = Material
 
 data Shape
   = Sphere {centre :: Vec, radius :: Flt}
-  | Plane {normal :: Vec, point :: Flt}
+  | Plane {normal :: Vec, d :: Flt}
   deriving Show
 
 data Object = Object
@@ -49,13 +50,21 @@ data ImageProperties = ImageProperties
   }
   deriving Show
 
--- Hit is a hit position, the normal of the surface at that point, and
--- whether the ray is entering the material (as opposed to leaving it)
-type Hit = (Vec, Vec, Bool)
+data Hit = Hit
+  { hitPos :: Vec
+  , surfaceNormal :: Vec
+  , isEntering :: Bool
+  }
+  deriving Show
 
+black :: Colour
+black = 0
+
+-- Get all of the intersections between a ray and a shape
+-- TODO: return t, so the closest one can be calculated more efficiently
 intersect :: Ray -> Shape -> [Hit]
 intersect (Ray rayOrigin rd) (Sphere centre r)
-  = [ (hitPos, surfaceNormal, didEnter surfaceNormal)
+  = [ Hit hitPos surfaceNormal entered
     | let ro = rayOrigin `vsub` centre
           -- a = rd `vdot` rd = 1 (rd is always a unit vector)
           b = 2 * (rd `vdot` ro)
@@ -66,111 +75,140 @@ intersect (Ray rayOrigin rd) (Sphere centre r)
     , t > 0.00001
     , let hitPos = rayOrigin `vadd` (rd `vscale` t)
           surfaceNormal = vnorm (hitPos `vsub` centre)
+          entered = rd `vdot` surfaceNormal <= 0
     ]
-  where
-    didEnter n = rd `vdot` n <= 0
 intersect (Ray ro rd) (Plane n d)
-  = [(ro `vadd` (rd `vscale` t), calcNormal, True) --TODO: work out plane entry/exit
+  = [ Hit hitPos surfaceNormal True --TODO: work out plane entry/exit
     | let denom = vdot n rd
-    , (denom /= 0)
+    , denom /= 0
     , let t = ((n `vdot` ro) + d / denom)
     , t > 0.00001
+    , let hitPos = ro `vadd` (rd `vscale` t)
+          surfaceNormal = if rd `vdot` n <= 0 then n else vinvert n
     ]
+
+-- Trace a ray through the world, calculating its final pixel contribution,
+-- starting from a material with refractive index ri.  It will calculate no more
+-- than maxRays rays.
+rayTrace :: RandomGen g
+  => World -> g -> Int -> RefractiveIndex -> Ray -> Pixel RGB Double
+rayTrace w rand 0 ri ray = black
+rayTrace w rand maxRays ri ray = processHits $ concat $ getHits <$> objects w
   where
-    calcNormal = if rd `vdot` n <= 0 then n else vinvert n
+    getHits :: Object -> [(Hit, Material)]
+    getHits o = ((,material o) <$> intersect ray (shape o))
 
-rayTrace :: RandomGen g => World -> RefractiveIndex -> Ray -> g -> Int -> Pixel RGB Double
-rayTrace w ri ray rand 0 = black
-rayTrace w ri ray rand limit = toColor $ concat $ (removeEmpties . (\o -> (intersect ray (shape o), material o))) <$> (objects w)
-  where toColor :: [(Hit, Material)] -> Colour
-        toColor [] = diffuseColour (sky w)
-        toColor vs = mkColour $ head $
-          sortBy (comparing ((\v -> vlen (origin ray `vsub` v)) . (\(a,b,c) -> a) . fst)) $ vs
-        mkColour ((hitPos, hitNorm, entering), mat)
-          = emissionColour mat
-          + diffuseColour mat * if p <= (transparency mat)
-                                   -- TODO: handle exiting into different material. Stack of RIs?
-              then rayTrace w (if entering then refractiveIndex mat else 1) (Ray hitPos refractedRay) rand2 (limit - 1)
-              else rayTrace w ri (Ray hitPos newRayDir) rand2 (limit - 1)
-          where
-            reflectedRay = (vnorm (dir ray `vsub` (hitNorm `vscale`
-                                   (2 * (dir ray `vdot` hitNorm))))) --TODO: use Vec reflect
-            refractedRay = snell (dir ray) hitNorm ri (refractiveIndex mat)
-            (newRayDir, rand1) = let
-              (r1, r2) = split rand
-              in (vnorm (vmap2 (lerp (specular mat)) (sampleHemisphere r1 hitNorm) reflectedRay), r2) --TODO: uniform vector lerp?
-            (p :: Double, rand2) = random rand1
-        removeEmpties ([], c) = []
-        removeEmpties (xs, c) = (,c) <$> xs
+    processHits :: [(Hit, Material)] -> Colour
+    processHits = mkColour . listToMaybe
+      -- TODO: maximum, not sort
+      . sortBy (comparing $ (\v -> vlen (origin ray `vsub` v)) . hitPos . fst)
 
+    mkColour Nothing = diffuseColour (sky w)
+    mkColour (Just (Hit hitPos hitNorm entering, mat))
+      = emissionColour mat + diffuseColour mat * recursiveRay
+     where
+       recursiveRay = if p <= transparency mat
+         then recurse riRefract (Ray hitPos refractedRay)
+         else recurse ri (Ray hitPos reflectedRay)
+
+       recurse = rayTrace w rand2 (maxRays - 1)
+
+       -- TODO: handle exiting into different material. Stack of RIs?
+       riRefract = if entering then refractiveIndex mat else 1
+
+       perfectReflect = reflect (dir ray) hitNorm
+
+       refractedRay = snell (dir ray) hitNorm ri (refractiveIndex mat)
+
+       (p, rand2) = random rand1
+
+       (reflectedRay, rand1) = let
+         (r1, r2) = split rand
+         randomRay = (sampleHemisphere r1 hitNorm)
+         in (vnorm (vlerp (specular mat) randomRay perfectReflect), r2)
+
+-- Snell's Law gives the refracted vector when a ray travels through a boundary
+-- TODO: check for total internal reflection
 snell :: Vec -> Vec -> RefractiveIndex -> RefractiveIndex -> Vec
-snell incident surfaceNorm n1 n2 = res
+snell incident surfaceNorm n1 n2
+  = (normal `vcross` (vinvert normal `vcross` incident) `vscale` r)
+  `vsub` (normal `vscale` sqrt rootTerm)
   where
-    normal = if incident `vdot` surfaceNorm <= 0 then surfaceNorm else vinvert surfaceNorm
-    res = (normal `vcross` (vinvert normal `vcross` incident) `vscale` (n1 / n2)) `vsub` (normal `vscale` sqrt rootTerm)
-    rootTerm = 1 - ((n1 / n2)^2) * (vlensqr (normal `vcross` incident))
+    normal = if incident `vdot` surfaceNorm <= 0
+      then surfaceNorm else vinvert surfaceNorm
+    rootTerm = 1 - (r^2) * (vlensqr (normal `vcross` incident))
+    r = n1 / n2
 
 -- Uniform sampling of points of a hemisphere with its pole in the
--- direction of v
+-- direction of v.
 sampleHemisphere :: RandomGen g => g -> Vec -> Vec
-sampleHemisphere rand v =
-  let u = sampleSphere rand
-  in if v `vdot` u >= 0 then u else (vinvert u)
+sampleHemisphere rand v = if v `vdot` u >= 0 then u else (vinvert u)
+  where u = sampleSphere rand
 
+-- Uniform sampling of points on a sphere.
 sampleSphere :: RandomGen g => g -> Vec
-sampleSphere rand = let
-  (u1, rand') = random rand
-  r = sqrt (1 - u1*u1)
-  (u2, _) = random rand'
-  phi = tau * u2
-  in Vec (cos phi * r) (sin phi * r) (2 * u1)
+sampleSphere rand = Vec (cos phi * r) (sin phi * r) (2 * u1)
+  where (u1, rand') = random rand
+        r = sqrt (1 - u1*u1)
+        (u2, _) = random rand'
+        phi = tau * u2
 
+-- Linear interpolation between two fractionals.
 lerp :: Fractional n => Double -> n -> n -> n
 lerp l a b = (realToFrac $ 1 - l) * a + realToFrac l * b
 
---Calculate the ray to project onto the film
+-- Linear interpolation between two vectors.
+-- TODO: this is just pontwise-lerping; should a uniform vector lerp be used?
+vlerp :: Double -> Vec -> Vec -> Vec
+vlerp l = vmap2 (lerp l)
+
+--Calculate the ray to cast for the given pixel.
 film :: ImageProperties -> Ray -> Double -> Double -> Ray
 film img cam i j = Ray (origin cam) (vnorm direction)
   --TODO: convert film to camera's coordinate system. Currently the
   --film is on the global xz plane.
-  where direction = (dir cam) `vadd` (Vec
-                                      (i / fromIntegral (width img) - 0.5)
-                                      0
-                                      (-1 * (j / fromIntegral (height img) - 0.5)))
+  where direction = dir cam `vadd` (Vec x 0 z)
+        x = (i / fromIntegral (width img) - 0.5)
+        z = (-1 * (j / fromIntegral (height img) - 0.5))
 
+-- Jitter a ray by +/-0.5px for anti-aliasing.
 jitter :: RandomGen g => g -> Int -> Double
 jitter rand n = (r - 0.5) + realToFrac n
   where r = fst $ random rand
 
-multipleRays :: RandomGen g => Int -> World -> ImageProperties -> Int -> Int -> g -> Pixel RGB Double
+-- Fire a given number of rays through the world and calculate the final pixel
+-- value.
+multipleRays :: RandomGen g
+  => Int -> World -> ImageProperties -> Int -> Int -> g -> Pixel RGB Double
 multipleRays count world img i j rand
-  = expAvg $ take count $ fmap (singleRay . split3) $ mkRands rand
+  = expAvg $ take count $ singleRay . split3 <$> mkRands rand
   where
-    singleRay = (\(r1, r2, r3) -> rayTrace world 1 (film img (camera world) (jitter r1 i) (jitter r2 j)) r3 (maxBounces img))
+    singleRay (r1, r2, r3) = rayTrace world r3 (maxBounces img) 1
+      (film img (camera world) (jitter r1 i) (jitter r2 j))
 
     --TODO: properly manage linear/logarithmic lighting
     expAvg :: [Pixel RGB Double] -> Pixel RGB Double
-    expAvg = brighten . (**(1/lightPower)) . foldr (+) 0 . fmap (/ (realToFrac count)) . fmap (**lightPower)
+    expAvg = brighten . (**(1/lightPower)) . foldr (+) 0
+      . fmap (/ (realToFrac count)) . fmap (**lightPower)
 
-    lightPower :: Pixel RGB Double
     lightPower = 3
     brighten = (**0.4)
 
+-- Render a scene into an image.
 render :: RandomGen g => ImageProperties -> World -> g -> Image VU RGB Double
 render img world rand = makeImage (height img, width img)
-  (\(j,i) -> multipleRays (raysPerPixel img) world img i j (rands ! (i,j)))
-  where
-    rands = splitMany rand (width img) (height img)
+  (\(j,i) -> multipleRays (raysPerPixel img) world img i j (getRand i j))
+  where getRand i j = splitMany rand (width img) (height img) ! (i,j)
 
+-- Split a random number generator into 3 new generators.
 split3 :: RandomGen g => g -> (g, g, g)
-split3 (split -> (r1, r2)) = (r2, r3, r4) where
-  (r3, r4) = split r1
+split3 (split -> (r1, r2)) = (r2, r3, r4)
+  where (r3, r4) = split r1
 
+-- Split a random number generator into an array of generators.
 splitMany :: RandomGen g => g -> Int -> Int -> Array (Int, Int) g
 splitMany rand x y = listArray ((0,0), (x,y)) (mkRands rand)
 
+-- Split a random number generator into an infinite list of generators.
 mkRands :: RandomGen g => g -> [g]
 mkRands = unfoldr (pure . split)
-
-black :: Colour
-black = 0
