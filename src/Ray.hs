@@ -16,6 +16,7 @@ data Material = Material
   { diffuseColour :: Colour
   , emissionColour :: Colour
   , specular :: Double -- 0 = pure diffuse, 1 = pure specular
+  , transparency :: Double -- 0 = opaque, 1 = transparent
   }
   deriving Show
 
@@ -79,13 +80,18 @@ rayTrace w ray rand limit = toColor $ concat $ (removeEmpties . (\o -> (intersec
         toColor vs = mkColour $ head $
           sortBy (comparing ((\v -> vlen (origin ray `vsub` v)) . fst . fst)) $ vs
         mkColour ((hitPos, hitNorm), mat)
-          = (emissionColour mat + diffuseColour mat * rayTrace w (Ray hitPos newRayDir) rand' (limit - 1))
+          = emissionColour mat
+          + diffuseColour mat * if p <= (transparency mat)
+              then rayTrace w (Ray hitPos refractedRay) rand2 (limit - 1)
+              else rayTrace w (Ray hitPos newRayDir) rand2 (limit - 1)
           where
             reflectedRay = (vnorm (dir ray `vsub` (hitNorm `vscale`
                                    (2 * (dir ray `vdot` hitNorm)))))
-            (newRayDir, rand') = let
+            refractedRay = dir ray
+            (newRayDir, rand1) = let
               (r1, r2) = split rand
               in (vnorm (vmap2 (lerp (specular mat)) (sampleHemisphere r1 hitNorm) reflectedRay), r2) --TODO: uniform vector lerp?
+            (p :: Double, rand2) = random rand1
         removeEmpties ([], c) = []
         removeEmpties (xs, c) = (,c) <$> xs
 

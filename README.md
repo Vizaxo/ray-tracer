@@ -4,6 +4,7 @@ This is a [path-tracing](https://en.wikipedia.org/wiki/Path_tracing) [ray tracer
 
 ## Images
 
+![Transparency](images/009-transparency.png)
 ![Mirror, mirror, upon the ball](images/008-mirror-balls.png)
 ![Smooth lighting](images/007-fixed-reflection-geometry.png)
 
