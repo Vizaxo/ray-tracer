@@ -107,13 +107,17 @@ lerp :: Fractional n => Double -> n -> n -> n
 lerp l a b = (realToFrac $ 1 - l) * a + realToFrac l * b
 
 --Calculate the ray to project onto the film
-film :: ImageProperties -> Ray -> Int -> Int -> Ray
+film :: ImageProperties -> Ray -> Double -> Double -> Ray
 film img cam i j = Ray (origin cam) direction
-  where direction = (vnorm (dir cam)) `vadd` (Vec (fromIntegral i / fromIntegral (width img) - (0.5)) 0 (fromIntegral j / fromIntegral (height img) - (0.5)))
+  --TODO: convert film to camera's coordinate system. Currently the film is on the global xz plane.
+  where direction = (vnorm (dir cam)) `vadd` (Vec (i / fromIntegral (width img) - 0.5) 0 (j / fromIntegral (height img) - 0.5))
 
-multipleRays :: RandomGen g => Int -> World -> Ray -> g -> Pixel RGB Double
-multipleRays count world ray rand = expAvg $ take count $ fmap (\r -> rayTrace world ray r 10) $ mkRands rand
+multipleRays :: RandomGen g => Int -> World -> ImageProperties -> Int -> Int -> g -> Pixel RGB Double
+multipleRays count world img i j rand
+  = expAvg $ take count $ fmap singleRay $ mkRands rand
   where
+    singleRay = (\(split -> (r1, r2)) -> rayTrace world (film img (camera world) (realToFrac i) (realToFrac j)) r2 4)
+
     --TODO: properly manage linear/logarithmic lighting
     expAvg :: [Pixel RGB Double] -> Pixel RGB Double
     expAvg = brighten . (**(1/lightPower)) . foldr (+) 0 . fmap (/ (realToFrac count)) . fmap (**lightPower)
@@ -123,8 +127,8 @@ multipleRays count world ray rand = expAvg $ take count $ fmap (\r -> rayTrace w
     brighten = (**0.25)
 
 render :: RandomGen g => ImageProperties -> World -> g -> Image VU RGB Double
-render img world rand = makeImage (width img, height img)
-  (\(i,j) -> multipleRays 32 world (film img (camera world) j i) (rands ! (i,j)))
+render img world rand = makeImage (height img, width img)
+  (\(j,i) -> multipleRays 32 world img i j (rands ! (i,j)))
   where
     rands = splitMany rand (width img) (height img)
 
@@ -136,7 +140,7 @@ mkRands = unfoldr (pure . split)
 
 testWorld :: World
 testWorld = World
-  { camera = Ray camPos (vnorm (vzero `vsub` camPos))
+  { camera = Ray camPos (vnorm (vinvert camPos))
   , objects = [ Object (Plane (vnorm (Vec 0.1 0.0 1)) (Vec 0 0 0)) cherryRed
               , Object (Plane (vnorm (Vec (-0.1) 0.0 1)) (Vec 0 0 (-0.1))) dullGreen
               , Object (Sphere (Vec 0 (-2) 1.5) 1) mirror
