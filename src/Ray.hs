@@ -12,11 +12,14 @@ tau = 2 * pi
 
 type Colour = Pixel RGB Double
 
+type RefractiveIndex = Double
+
 data Material = Material
   { diffuseColour :: Colour
   , emissionColour :: Colour
   , specular :: Double -- 0 = pure diffuse, 1 = pure specular
   , transparency :: Double -- 0 = opaque, 1 = transparent
+  , refractiveIndex :: RefractiveIndex
   }
   deriving Show
 
@@ -46,12 +49,13 @@ data ImageProperties = ImageProperties
   }
   deriving Show
 
--- Hit is a hit position, and the normal of the surface at that point
-type Hit = (Vec, Vec)
+-- Hit is a hit position, the normal of the surface at that point, and
+-- whether the ray is entering the material (as opposed to leaving it)
+type Hit = (Vec, Vec, Bool)
 
 intersect :: Ray -> Shape -> [Hit]
 intersect (Ray rayOrigin rd) (Sphere centre r)
-  = [ (hitPos, vnorm (hitPos `vsub` centre))
+  = [ (hitPos, surfaceNormal, didEnter surfaceNormal)
     | let ro = rayOrigin `vsub` centre
           -- a = rd `vdot` rd = 1 (rd is always a unit vector)
           b = 2 * (rd `vdot` ro)
@@ -61,9 +65,12 @@ intersect (Ray rayOrigin rd) (Sphere centre r)
     , let t = (-b + (plusMinus * root)) / 2
     , t > 0.00001
     , let hitPos = rayOrigin `vadd` (rd `vscale` t)
+          surfaceNormal = vnorm (hitPos `vsub` centre)
     ]
+  where
+    didEnter n = rd `vdot` n <= 0
 intersect (Ray ro rd) (Plane n d)
-  = [(ro `vadd` (rd `vscale` t), calcNormal)
+  = [(ro `vadd` (rd `vscale` t), calcNormal, True) --TODO: work out plane entry/exit
     | let denom = vdot n rd
     , (denom /= 0)
     , let t = ((n `vdot` ro) + d / denom)
@@ -72,28 +79,36 @@ intersect (Ray ro rd) (Plane n d)
   where
     calcNormal = if rd `vdot` n <= 0 then n else vinvert n
 
-rayTrace :: RandomGen g => World -> Ray -> g -> Int -> Pixel RGB Double
-rayTrace w ray rand 0 = black
-rayTrace w ray rand limit = toColor $ concat $ (removeEmpties . (\o -> (intersect ray (shape o), material o))) <$> (objects w)
+rayTrace :: RandomGen g => World -> RefractiveIndex -> Ray -> g -> Int -> Pixel RGB Double
+rayTrace w ri ray rand 0 = black
+rayTrace w ri ray rand limit = toColor $ concat $ (removeEmpties . (\o -> (intersect ray (shape o), material o))) <$> (objects w)
   where toColor :: [(Hit, Material)] -> Colour
         toColor [] = diffuseColour (sky w)
         toColor vs = mkColour $ head $
-          sortBy (comparing ((\v -> vlen (origin ray `vsub` v)) . fst . fst)) $ vs
-        mkColour ((hitPos, hitNorm), mat)
+          sortBy (comparing ((\v -> vlen (origin ray `vsub` v)) . (\(a,b,c) -> a) . fst)) $ vs
+        mkColour ((hitPos, hitNorm, entering), mat)
           = emissionColour mat
           + diffuseColour mat * if p <= (transparency mat)
-              then rayTrace w (Ray hitPos refractedRay) rand2 (limit - 1)
-              else rayTrace w (Ray hitPos newRayDir) rand2 (limit - 1)
+                                   -- TODO: handle exiting into different material. Stack of RIs?
+              then rayTrace w (if entering then refractiveIndex mat else 1) (Ray hitPos refractedRay) rand2 (limit - 1)
+              else rayTrace w ri (Ray hitPos newRayDir) rand2 (limit - 1)
           where
             reflectedRay = (vnorm (dir ray `vsub` (hitNorm `vscale`
-                                   (2 * (dir ray `vdot` hitNorm)))))
-            refractedRay = dir ray
+                                   (2 * (dir ray `vdot` hitNorm))))) --TODO: use Vec reflect
+            refractedRay = snell (dir ray) hitNorm ri (refractiveIndex mat)
             (newRayDir, rand1) = let
               (r1, r2) = split rand
               in (vnorm (vmap2 (lerp (specular mat)) (sampleHemisphere r1 hitNorm) reflectedRay), r2) --TODO: uniform vector lerp?
             (p :: Double, rand2) = random rand1
         removeEmpties ([], c) = []
         removeEmpties (xs, c) = (,c) <$> xs
+
+snell :: Vec -> Vec -> RefractiveIndex -> RefractiveIndex -> Vec
+snell incident surfaceNorm n1 n2 = res
+  where
+    normal = if incident `vdot` surfaceNorm <= 0 then surfaceNorm else vinvert surfaceNorm
+    res = (normal `vcross` (vinvert normal `vcross` incident) `vscale` (n1 / n2)) `vsub` (normal `vscale` sqrt rootTerm)
+    rootTerm = 1 - ((n1 / n2)^2) * (vlensqr (normal `vcross` incident))
 
 -- Uniform sampling of points of a hemisphere with its pole in the
 -- direction of v
@@ -131,7 +146,7 @@ multipleRays :: RandomGen g => Int -> World -> ImageProperties -> Int -> Int -> 
 multipleRays count world img i j rand
   = expAvg $ take count $ fmap (singleRay . split3) $ mkRands rand
   where
-    singleRay = (\(r1, r2, r3) -> rayTrace world (film img (camera world) (jitter r1 i) (jitter r2 j)) r3 (maxBounces img))
+    singleRay = (\(r1, r2, r3) -> rayTrace world 1 (film img (camera world) (jitter r1 i) (jitter r2 j)) r3 (maxBounces img))
 
     --TODO: properly manage linear/logarithmic lighting
     expAvg :: [Pixel RGB Double] -> Pixel RGB Double

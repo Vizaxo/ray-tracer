@@ -18,7 +18,8 @@ testWorld = World
               , Object (Sphere (Vec 1.3 0 (-0.5)) 1.2) redLight
               , Object (Sphere (Vec 3 (-5) (-1)) 1.2) blueLight
               , Object (Sphere (Vec (-2) (-3) (4)) 0.6) greenLight
-              , Object (Sphere (Vec 0 (-5) 0) 1) greenGlass
+              , Object (Sphere (Vec (-0.2) (-5) 0) 1) glass
+              , Object (Sphere (Vec 1 (-6.5) 0.1) 0.8) glass
               ]
   , sky = mkColour 0.01 0.02 0.01
   }
@@ -31,6 +32,7 @@ defaultMaterial = Material
   , emissionColour = black
   , specular = 0
   , transparency = 0
+  , refractiveIndex = 1
   }
 
 skyBlue = mkColour 0.2 0.4 0.7
@@ -38,12 +40,13 @@ cherryRed = mkColour 0.9 0.3 0.2
 dullGreen = mkColour 0.3 0.8 0.4
 grey = mkColour 0.4 0.4 0.4
 pink = mkColour 0.9 0.3 0.4
+red = mkColour 1.0 0.2 0.2
 mirror = defaultMaterial {diffuseColour = PixelRGB 0.97 0.97 1, specular = 1}
 mkColour r g b = defaultMaterial {diffuseColour = PixelRGB r g b}
 redLight = defaultMaterial {emissionColour = PixelRGB 1 0.3 0.1}
 blueLight = defaultMaterial {emissionColour = PixelRGB 0.2 0.3 1}
 greenLight = defaultMaterial {emissionColour = PixelRGB 0.1 0.4 0.1}
-greenGlass = defaultMaterial {diffuseColour = PixelRGB 0.95 1 0.95, specular = 0.99, transparency = 0.9 }
+glass = defaultMaterial {diffuseColour = PixelRGB 1 1 1, specular = 0.99, transparency = 0.95, refractiveIndex = 1.1 }
 
 hqImage :: ImageProperties
 hqImage = ImageProperties
