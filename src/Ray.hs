@@ -112,11 +112,15 @@ film img cam i j = Ray (origin cam) direction
   --TODO: convert film to camera's coordinate system. Currently the film is on the global xz plane.
   where direction = (vnorm (dir cam)) `vadd` (Vec (i / fromIntegral (width img) - 0.5) 0 (j / fromIntegral (height img) - 0.5))
 
+jitter :: RandomGen g => g -> Int -> Double
+jitter rand n = (r - 0.5) + realToFrac n
+  where r = fst $ random rand
+
 multipleRays :: RandomGen g => Int -> World -> ImageProperties -> Int -> Int -> g -> Pixel RGB Double
 multipleRays count world img i j rand
-  = expAvg $ take count $ fmap singleRay $ mkRands rand
+  = expAvg $ take count $ fmap (singleRay . split3) $ mkRands rand
   where
-    singleRay = (\(split -> (r1, r2)) -> rayTrace world (film img (camera world) (realToFrac i) (realToFrac j)) r2 4)
+    singleRay = (\(r1, r2, r3) -> rayTrace world (film img (camera world) (jitter r1 i) (jitter r2 j)) r3 4)
 
     --TODO: properly manage linear/logarithmic lighting
     expAvg :: [Pixel RGB Double] -> Pixel RGB Double
@@ -131,6 +135,10 @@ render img world rand = makeImage (height img, width img)
   (\(j,i) -> multipleRays 32 world img i j (rands ! (i,j)))
   where
     rands = splitMany rand (width img) (height img)
+
+split3 :: RandomGen g => g -> (g, g, g)
+split3 (split -> (r1, r2)) = (r2, r3, r4) where
+  (r3, r4) = split r1
 
 splitMany :: RandomGen g => g -> Int -> Int -> Array (Int, Int) g
 splitMany rand x y = listArray ((0,0), (x,y)) (mkRands rand)
