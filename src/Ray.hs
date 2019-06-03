@@ -105,11 +105,15 @@ rayTrace w rand maxRays ri ray = processHits $ concat $ getHits <$> objects w
 
     mkColour Nothing = diffuseColour (sky w)
     mkColour (Just (Hit hitPos hitNorm entering, mat))
-      = emissionColour mat + diffuseColour mat * recursiveRay
+      = emissionColour mat
+      + if p <= transparency mat then refractedContrib else reflectedContrib
      where
-       recursiveRay = if p <= transparency mat
-         then recurse riRefract (Ray hitPos refractedRay)
-         else recurse ri (Ray hitPos reflectedRay)
+       --TODO: Russian Roulette
+       refractedContrib = recurse riRefract (Ray hitPos refractedRay) * 1.15
+       reflectedContrib = recurse ri (Ray hitPos reflectedRay)
+         * diffuseColour mat
+         --TODO: fix reflection from pure specular not in right direction
+         * realToFrac (reflectedRay `vdot` hitNorm)
 
        recurse = rayTrace w rand2 (maxRays - 1)
 
@@ -181,18 +185,13 @@ jitter rand n = (r - 0.5) + realToFrac n
 multipleRays :: RandomGen g
   => Int -> World -> ImageProperties -> Int -> Int -> g -> Pixel RGB Double
 multipleRays count world img i j rand
-  = expAvg $ take count $ singleRay . split3 <$> mkRands rand
+  = avg $ take count $ singleRay . split3 <$> mkRands rand
   where
     singleRay (r1, r2, r3) = rayTrace world r3 (maxBounces img) 1
       (film img (camera world) (jitter r1 i) (jitter r2 j))
 
-    --TODO: properly manage linear/logarithmic lighting
-    expAvg :: [Pixel RGB Double] -> Pixel RGB Double
-    expAvg = brighten . (**(1/lightPower)) . foldr (+) 0
-      . fmap (/ (realToFrac count)) . fmap (**lightPower)
-
-    lightPower = 3
-    brighten = (**0.4)
+    avg :: [Pixel RGB Double] -> Pixel RGB Double
+    avg =  foldr (+) 0 . fmap (/ (realToFrac count))
 
 -- Render a scene into an image.
 render :: RandomGen g => ImageProperties -> World -> g -> Image VU RGB Double
