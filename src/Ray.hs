@@ -151,7 +151,7 @@ rayTrace w rand maxRays ri ray = processHits $ concat $ getHits <$> objects w
 
        (reflectedRay, rand1) = let
          (r1, r2) = split rand
-         randomRay = (sampleHemisphere r1 hitNorm)
+         randomRay = vnorm (sampleHemisphere r1 hitNorm)
          in (vnorm (vlerp (specular mat) randomRay perfectReflect), r2)
 
 -- Snell's Law gives the refracted vector when a ray travels through a boundary
