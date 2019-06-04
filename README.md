@@ -1,3 +1,5 @@
+[![Build Status](https://travis-ci.com/Vizaxo/ray-tracer.svg?branch=master)](https://travis-ci.com/Vizaxo/ray-tracer)
+
 # Ray tracer
 
 This is a [path-tracing](https://en.wikipedia.org/wiki/Path_tracing) [ray tracer](https://en.wikipedia.org/wiki/Ray_tracing_(graphics)) written in Haskell.

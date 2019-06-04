@@ -34,3 +34,12 @@ executables:
     - -O2
     dependencies:
     - ray-tracer
+
+tests:
+  raytracer-test:
+    source-dirs: test
+    main: Spec.hs
+    ghc-options:
+    - -threaded
+    dependencies:
+    - ray-tracer
