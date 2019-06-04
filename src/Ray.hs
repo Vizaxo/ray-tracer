@@ -125,7 +125,11 @@ rayTrace w rand maxRays ri ray = processHits $ concat $ getHits <$> objects w
     mkColour Nothing = diffuseColour (sky w)
     mkColour (Just (Hit hitPos hitNorm entering, mat))
       = emissionColour mat
-      + if p <= transparency mat then refractedContrib else reflectedContrib
+      + if (diffuseColour mat /= 0)
+        then (if p <= transparency mat
+              then refractedContrib
+              else reflectedContrib)
+        else 0
      where
        --TODO: Russian Roulette
        refractedContrib = recurse riRefract (Ray hitPos refractedRay) * 1.15
