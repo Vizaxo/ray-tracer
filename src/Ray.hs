@@ -8,21 +8,10 @@ import Data.Ord
 import Data.Maybe
 import System.Random
 
+import Materials
+
 tau :: Floating a => a
 tau = 2 * pi
-
-type Colour = Pixel RGB Double
-
-type RefractiveIndex = Double
-
-data Material = Material
-  { diffuseColour :: Colour
-  , emissionColour :: Colour
-  , specular :: Double -- 0 = pure diffuse, 1 = pure specular
-  , transparency :: Double -- 0 = opaque, 1 = transparent
-  , refractiveIndex :: RefractiveIndex
-  }
-  deriving Show
 
 data Shape
   = Sphere {centre :: Vec, radius :: Flt}
@@ -58,9 +47,6 @@ data Hit = Hit
   }
   deriving Show
 
-black :: Colour
-black = 0
-
 -- Get all of the intersections between a ray and a shape
 -- TODO: return t, so the closest one can be calculated more efficiently
 intersect :: Ray -> Shape -> [Hit]
@@ -82,7 +68,7 @@ intersect (Ray ro rd) (Plane n d)
   = [ Hit hitPos surfaceNormal True --TODO: work out plane entry/exit
     | let denom = vdot n rd
     , denom /= 0
-    , let t = ((n `vdot` ro) + d / denom)
+    , let t = -1 * ((n `vdot` ro) + d / denom)
     , t > 0.00001
     , let hitPos = ro `vadd` (rd `vscale` t)
           surfaceNormal = if rd `vdot` n <= 0 then n else vinvert n
