@@ -191,7 +191,7 @@ vlerp l = vmap2 (lerp l)
 
 --Calculate the ray to cast for the given pixel.
 film :: ImageProperties -> Ray -> Double -> Double -> Ray
-film img cam i j = Ray (origin cam) (vnorm direction)
+film img cam i j = Ray (origin cam `vadd` direction) (vnorm direction)
   --TODO: convert film to camera's coordinate system. Currently the
   --film is on the global xz plane.
   where direction = dir cam `vadd` (Vec x 0 z)
