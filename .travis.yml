@@ -27,3 +27,6 @@ install:
 script:
 # Build the package, its tests, and its docs and run the tests
 - stack --no-nix --no-terminal test --haddock --no-haddock-deps
+
+after_success:
+- stack --no-nix --no-terminal bench
