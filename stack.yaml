@@ -69,3 +69,6 @@ extra-deps:
 nix:
   enable: true
   packages: [ zlib llvm ]
+
+ghc-options:
+  "$locals": -fwarn-incomplete-patterns -fwarn-unused-imports
