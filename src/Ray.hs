@@ -47,6 +47,7 @@ data ImageProperties = ImageProperties
   , height :: Int
   , raysPerPixel :: Int
   , maxBounces :: Int
+  , flatColours :: Bool
   }
   deriving Show
 
@@ -86,6 +87,24 @@ intersect (Ray ro rd) (Plane n d)
     , let hitPos = ro `vadd` (rd `vscale` t)
           surfaceNormal = if rd `vdot` n <= 0 then n else vinvert n
     ]
+
+-- Quickly trace a ray returning a flat colour
+traceFlat :: World -> ImageProperties -> Int -> Int -> Pixel RGB Double
+traceFlat w img i j = processHits $ concat $ getHits <$> objects w
+  where
+    ray = film img (camera w) (realToFrac i) (realToFrac j)
+
+    getHits :: Object -> [(Hit, Material)]
+    getHits o = ((,material o) <$> intersect ray (shape o))
+
+    processHits :: [(Hit, Material)] -> Colour
+    processHits = mkColour . listToMaybe
+      -- TODO: maximum, not sort
+      . sortBy (comparing $ (\v -> vlen (origin ray `vsub` v)) . hitPos . fst)
+
+    mkColour Nothing = diffuseColour (sky w)
+    mkColour (Just (Hit hitPos hitNorm entering, mat))
+      = emissionColour mat + (diffuseColour mat * 0.0003)
 
 -- Trace a ray through the world, calculating its final pixel contribution,
 -- starting from a material with refractive index ri.  It will calculate no more
@@ -196,8 +215,12 @@ multipleRays count world img i j rand
 -- Render a scene into an image.
 render :: RandomGen g => ImageProperties -> World -> g -> Image VU RGB Double
 render img world rand = makeImage (height img, width img)
-  (\(j,i) -> multipleRays (raysPerPixel img) world img i j (getRand i j))
-  where getRand i j = splitMany rand (width img) (height img) ! (i,j)
+  (\(j,i) -> calcPixel i j)
+  where
+    getRand i j = splitMany rand (width img) (height img) ! (i,j)
+    calcPixel i j
+      | flatColours img = traceFlat world img i j
+      | otherwise = multipleRays (raysPerPixel img) world img i j (getRand i j)
 
 -- Split a random number generator into 3 new generators.
 split3 :: RandomGen g => g -> (g, g, g)

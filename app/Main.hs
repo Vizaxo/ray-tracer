@@ -59,14 +59,18 @@ hqImage = ImageProperties
   { width = 720
   , height = 720
   , raysPerPixel = 256
-  , maxBounces = 10 }
+  , maxBounces = 10
+  , flatColours = False
+  }
 
 testImage :: ImageProperties
 testImage = ImageProperties
   { width = 150
   , height = 150
   , raysPerPixel = 8
-  , maxBounces = 4 }
+  , maxBounces = 4
+  , flatColours = False
+  }
 
 renderedImage :: RandomGen g => g -> Image VU RGB Double
 renderedImage rand = render testImage testWorld rand
