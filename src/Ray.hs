@@ -2,13 +2,14 @@ module Ray where
 
 import Data.Array
 import Data.Glome.Vec as V
-import Graphics.Image hiding (Array, map)
 import Data.List hiding (intersect)
-import Data.Ord
 import Data.Maybe
-import System.Random
+import Data.Ord
+import Graphics.Image hiding (Array, map, traverse)
 
 import Materials
+import Rand
+import Utils
 
 tau :: Floating a => a
 tau = 2 * pi
@@ -95,36 +96,44 @@ traceFlat w img i j = processHits $ concat $ getHits <$> objects w
 -- Trace a ray through the world, calculating its final pixel contribution,
 -- starting from a material with refractive index ri.  It will calculate no more
 -- than maxRays rays.
-rayTrace :: RandomGen g
-  => World -> g -> Int -> RefractiveIndex -> Ray -> Pixel RGB Double
-rayTrace w rand 0 ri ray = black
-rayTrace w rand maxRays ri ray = processHits $ concat $ getHits <$> objects w
+rayTrace :: World -> Int -> RefractiveIndex -> Ray -> Rand (Pixel RGB Double)
+rayTrace w 0 ri ray = pure black
+rayTrace w maxRays ri ray = processHits $ concat $ getHits <$> objects w
   where
     getHits :: Object -> [(Hit, Material)]
     getHits o = ((,material o) <$> intersect ray (shape o))
 
-    processHits :: [(Hit, Material)] -> Colour
+    processHits :: [(Hit, Material)] -> Rand Colour
     processHits = mkColour . listToMaybe
       -- TODO: maximum, not sort
       . sortBy (comparing $ (\v -> vlen (origin ray `vsub` v)) . hitPos . fst)
 
-    mkColour Nothing = diffuseColour (sky w)
-    mkColour (Just (Hit hitPos hitNorm entering, mat))
-      = emissionColour mat
-      + if (diffuseColour mat /= 0)
-        then (if p <= transparency mat
-              then refractedContrib
-              else reflectedContrib)
-        else 0
+    mkColour :: Maybe (Hit, Material) -> Rand Colour
+    mkColour Nothing = pure (diffuseColour (sky w))
+    mkColour (Just (Hit hitPos hitNorm entering, mat)) = do
+      p <- getRand
+      nextRayContrib <- if (diffuseColour mat /= 0)
+        then
+          if p <= transparency mat
+            then refractedContrib
+            else reflectedContrib
+        else pure (PixelRGB 0 0 0)
+      pure $ emissionColour mat + nextRayContrib
      where
        --TODO: Russian Roulette
-       refractedContrib = recurse riRefract (Ray hitPos refractedRay) * 1.15
-       reflectedContrib = recurse ri (Ray hitPos reflectedRay)
-         * diffuseColour mat
-         --TODO: fix reflection from pure specular not in right direction
-         * realToFrac (reflectedRay `vdot` hitNorm)
+       refractedContrib :: Rand Colour
+       refractedContrib = (* 1.15) <$> recurse riRefract (Ray hitPos refractedRay)
 
-       recurse = rayTrace w rand2 (maxRays - 1)
+       reflectedContrib :: Rand Colour
+       reflectedContrib = do
+         ray <- reflectedRay
+         nextRayContrib <- recurse ri (Ray hitPos ray)
+         pure (nextRayContrib
+               * diffuseColour mat
+              --TODO: fix reflection from pure specular not in right direction
+               * realToFrac (ray `vdot` hitNorm))
+
+       recurse = rayTrace w (maxRays - 1)
 
        -- TODO: handle exiting into different material. Stack of RIs?
        riRefract = if entering then refractiveIndex mat else 1
@@ -133,12 +142,9 @@ rayTrace w rand maxRays ri ray = processHits $ concat $ getHits <$> objects w
 
        refractedRay = snell (dir ray) hitNorm ri (refractiveIndex mat)
 
-       (p, rand2) = random rand1
-
-       (reflectedRay, rand1) = let
-         (r1, r2) = split rand
-         randomRay = vnorm (sampleHemisphere r1 hitNorm)
-         in (vnorm (vlerp (specular mat) randomRay perfectReflect), r2)
+       reflectedRay = do
+         randomRay <- vnorm <$> sampleHemisphere hitNorm
+         pure (vnorm (vlerp (specular mat) randomRay perfectReflect))
 
 -- Snell's Law gives the refracted vector when a ray travels through a boundary
 -- TODO: check for total internal reflection
@@ -154,17 +160,19 @@ snell incident surfaceNorm n1 n2
 
 -- Uniform sampling of points of a hemisphere with its pole in the
 -- direction of v.
-sampleHemisphere :: RandomGen g => g -> Vec -> Vec
-sampleHemisphere rand v = if v `vdot` u >= 0 then u else (vinvert u)
-  where u = sampleSphere rand
+sampleHemisphere :: Vec -> Rand Vec
+sampleHemisphere v = do
+  u <- sampleSphere
+  pure (if v `vdot` u >= 0 then u else (vinvert u))
 
 -- Uniform sampling of points on a sphere.
-sampleSphere :: RandomGen g => g -> Vec
-sampleSphere rand = Vec (cos phi * r) (sin phi * r) (2 * u1)
-  where (u1, rand') = random rand
-        r = sqrt (1 - u1*u1)
-        (u2, _) = random rand'
-        phi = tau * u2
+sampleSphere :: Rand Vec
+sampleSphere = do
+  u1 <- getRand
+  u2 <- getRand
+  let r = sqrt (1 - u1*u1)
+      phi = tau * u2
+  pure (Vec (cos phi * r) (sin phi * r) (2 * u1))
 
 -- Linear interpolation between two fractionals.
 lerp :: Fractional n => Double -> n -> n -> n
@@ -185,42 +193,35 @@ film img cam i j = Ray (origin cam `vadd` direction) (vnorm direction)
         z = (-1 * (j / fromIntegral (height img) - 0.5))
 
 -- Jitter a ray by +/-0.5px for anti-aliasing.
-jitter :: RandomGen g => g -> Int -> Double
-jitter rand n = (r - 0.5) + realToFrac n
-  where r = fst $ random rand
+jitter :: Int -> Rand Double
+jitter n = do
+  r <- getRand
+  pure ((r - 0.5) + realToFrac n)
 
 -- Fire a given number of rays through the world and calculate the final pixel
 -- value.
-multipleRays :: RandomGen g
-  => Int -> World -> ImageProperties -> Int -> Int -> g -> Pixel RGB Double
-multipleRays count world img i j rand
-  = avg $ take count $ singleRay . split3 <$> mkRands rand
+multipleRays ::
+  Int -> World -> ImageProperties -> Int -> Int -> Rand (Pixel RGB Double)
+multipleRays count world img i j
+  = avg <$> doTimes count singleRay
   where
-    singleRay (r1, r2, r3) = rayTrace world r3 (maxBounces img) 1
-      (film img (camera world) (jitter r1 i) (jitter r2 j))
+    singleRay = do
+      ji <- jitter i
+      jj <- jitter j
+      rayTrace world (maxBounces img) 1 (film img (camera world) ji jj)
 
     avg :: [Pixel RGB Double] -> Pixel RGB Double
     avg =  foldr (+) 0 . fmap (/ (realToFrac count))
 
 -- Render a scene into an image.
-render :: RandomGen g => ImageProperties -> World -> g -> Image VU RGB Double
-render img world rand = makeImage (height img, width img)
-  (\(j,i) -> calcPixel i j)
+render :: ImageProperties -> World -> Rand (Image VU RGB Double)
+render img world = do
+  let bounds = ((0,0), (width img - 1, height img - 1))
+      indices = range bounds
+  results <- traverse calcPixel indices
+  let arr = listArray bounds results
+  pure (makeImage (height img, width img) (\(j,i) -> arr ! (i, j)))
   where
-    getRand i j = splitMany rand (width img) (height img) ! (i,j)
-    calcPixel i j
-      | flatColours img = traceFlat world img i j
-      | otherwise = multipleRays (raysPerPixel img) world img i j (getRand i j)
-
--- Split a random number generator into 3 new generators.
-split3 :: RandomGen g => g -> (g, g, g)
-split3 (split -> (r1, r2)) = (r2, r3, r4)
-  where (r3, r4) = split r1
-
--- Split a random number generator into an array of generators.
-splitMany :: RandomGen g => g -> Int -> Int -> Array (Int, Int) g
-splitMany rand x y = listArray ((0,0), (x,y)) (mkRands rand)
-
--- Split a random number generator into an infinite list of generators.
-mkRands :: RandomGen g => g -> [g]
-mkRands = unfoldr (pure . split)
+    calcPixel (i, j)
+      | flatColours img = pure (traceFlat world img i j)
+      | otherwise = multipleRays (raysPerPixel img) world img i j

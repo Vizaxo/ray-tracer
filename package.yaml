@@ -8,6 +8,8 @@ dependencies:
 - hip
 - random
 - array
+- mwc-random
+- mtl
 
 default-extensions:
 - DataKinds
@@ -19,6 +21,10 @@ default-extensions:
 - TypeApplications
 - ViewPatterns
 - TupleSections
+- GeneralizedNewtypeDeriving
+- FlexibleContexts
+- MultiParamTypeClasses
+- LambdaCase
 
 library:
   source-dirs: src

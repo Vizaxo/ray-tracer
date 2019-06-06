@@ -1,12 +1,13 @@
 module Image where
 
 import Graphics.Image as I
-import System.Random
 
+import Rand
 import Ray
+import Utils
 
 renderScene :: ImageProperties -> World -> IO (Image VU RGB Double)
-renderScene props scene = tosRGB . render props scene <$> newStdGen
+renderScene = fmap tosRGB .: runRandIO .: render
 
 writeSceneImage :: ImageProperties -> World -> FilePath -> IO ()
 writeSceneImage props scene filename = writeImage filename =<< renderScene props scene
