@@ -10,6 +10,7 @@ dependencies:
 - array
 - mwc-random
 - mtl
+- threads
 
 default-extensions:
 - DataKinds

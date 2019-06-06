@@ -1,5 +1,6 @@
 module Ray where
 
+import Control.Monad.Except
 import Data.Array
 import Data.Glome.Vec as V
 import Data.List hiding (intersect)
@@ -8,6 +9,7 @@ import Data.Ord
 import Graphics.Image hiding (Array, map, traverse)
 
 import Materials
+import ParallelArray
 import Rand
 import Utils
 
@@ -214,13 +216,15 @@ multipleRays count world img i j
     avg =  foldr (+) 0 . fmap (/ (realToFrac count))
 
 -- Render a scene into an image.
-render :: ImageProperties -> World -> Rand (Image VU RGB Double)
+render :: ImageProperties -> World -> IO (Image VU RGB Double)
 render img world = do
   let bounds = ((0,0), (width img - 1, height img - 1))
       indices = range bounds
-  results <- traverse calcPixel indices
-  let arr = listArray bounds results
-  pure (makeImage (height img, width img) (\(j,i) -> arr ! (i, j)))
+  --results <- traverse calcPixel indices
+  runExceptT (parallelMkArray (runRandIO . calcPixel) bounds) >>= \case
+    Left err -> error $ "Thread error: " <> show err
+    Right arr
+      -> pure (makeImage (height img, width img) (\(j,i) -> arr ! (i, j)))
   where
     calcPixel (i, j)
       | flatColours img = pure (traceFlat world img i j)
